@@ -272,6 +272,13 @@ class WamaiToolkitMainWindow(QMainWindow):
         self.frame_select.valueChanged.connect(self.load_unlabelled_frame)
         label_options_layout.addRow("Frame to label: ", self.frame_select)
 
+        self.always_reset_checkmarks = QCheckBox()
+        self.always_reset_checkmarks.setToolTip("Sets the zone checkboxes according to the labels even when "
+                                                "all labels are `False`. Useful when checking labels are correct, "
+                                                "but otherwise leaving this off will stop the checkboxes from becoming "
+                                                "unchecked after labelling a frame.")
+        label_options_layout.addRow("Always reset label states?: ", self.always_reset_checkmarks)
+
         unlabelled_data_folder_layout = QHBoxLayout()
         self.unlabelled_data_folder = QTextEdit()
         self.unlabelled_data_folder_select = QPushButton("Select folder...")
@@ -288,7 +295,7 @@ class WamaiToolkitMainWindow(QMainWindow):
         label_options_layout.addRow("Labelled data output path: ", labelled_data_folder_layout)
         self.labelled_data_file_select.clicked.connect(self.select_dataset_labels_file)
 
-        self.labelled_data_submit = QPushButton("Add labelled frame to output folder")
+        self.labelled_data_submit = QPushButton("Add labels to label file")
         self.labelled_data_submit.clicked.connect(self.add_labelled_frame)
         labelling_layout = QVBoxLayout()
         labelling_layout.addLayout(label_options_layout)
@@ -304,16 +311,17 @@ class WamaiToolkitMainWindow(QMainWindow):
 
     def select_dataset_labels_file(self):
         self.labelled_data_file.setText(QFileDialog.getSaveFileName(filter="Dataset label file (*.csv)")[0])
-        self.create_note_presence_label_file_stub(self.labelled_data_file.toPlainText())
+        self.create_note_presence_label_file_frame(self.labelled_data_file.toPlainText())
         for checkbox in self.label_checkboxes:
             checkbox.setChecked(False)
 
-
-    def create_note_presence_label_file_stub(self, path):
+    def create_note_presence_label_file_stub_LEGACY(self, path):
         # TODO: After okinimesumama is labelled, change system to generate all rows immediately, then use `iloc`
         #  to change the correct row for a frame - allows for error correction without an external program
         path = Path(path)
-        columns = ["file_name", "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8"]
+        columns = ["file_name",
+                   "b1", "b2", "b3", "b4",
+                   "b5", "b6", "b7", "b8"]
         if not exists(path):
             with open(path, "w") as label_file:
                 pd.DataFrame(columns=["file_name",
@@ -337,6 +345,102 @@ class WamaiToolkitMainWindow(QMainWindow):
                 self.labelled_data_file.setText("")
                 return
         self.label_file_path = path
+
+    def add_note_presence_labels_LEGACY(self, path):
+        data = [self.unlabelled_file_list[self.frame_select.value()][1]]
+
+        for checkbox in self.label_checkboxes:
+            data.append(checkbox.isChecked())
+        self.label_dataframe.loc[len(self.label_dataframe.index)] = data
+        with open(path, "w") as label_file:
+            self.label_dataframe.to_csv(label_file, index=False)
+
+    def add_labelled_frame_LEGACY(self):
+        if self.frame_select.value() == self.frame_select.maximum():
+            self.status_bar.showMessage("Final frame for this dataset has been labelled.", timeout=15000)
+        else:
+            self.add_note_presence_labels_LEGACY(self.label_file_path)
+            self.frame_select.setValue(self.frame_select.value() + 1)
+
+        # Add label data to CSV - create if not made and add columns, add row, check if full?, load frame after last in csv?
+
+
+    def create_note_presence_label_file_frame(self, path):
+        if not self.unlabelled_file_list:
+            self.status_bar.showMessage("No data to make label frame file. "
+                                        "Please select a dataset first.", timeout=15000)
+            return
+
+        path = Path(path)
+        columns = ["file_name",
+                   "b1", "b2", "b3", "b4",
+                   "b5", "b6", "b7", "b8"]
+        if not exists(path):
+            # Generate empty rows
+            self.label_dataframe = pd.DataFrame(columns=columns)
+            for frame in self.unlabelled_file_list:
+                self.label_dataframe.loc[len(self.label_dataframe.index)] = [frame[1],
+                                                             False, False, False, False,
+                                                             False, False, False, False]
+            with open(path, "w") as label_file:
+                self.label_dataframe.to_csv(label_file, index=False)
+
+            self.frame_select.setValue(0)
+
+        else:
+            self.status_bar.showMessage("Reading existing label file...", timeout=3000)
+            try:
+                with open(path, "r") as label_file:
+                    df = pd.read_csv(label_file)
+                if list(df.columns) != columns:
+                    self.status_bar.showMessage("Specified file is not a valid label file.", 5000)
+                    self.labelled_data_file.setText("")
+                else:
+                    num_rows = len(df.index)
+                    if num_rows != len(self.unlabelled_file_list):  # Most likely legacy label file
+                        raise ValueError("Specified dataframe is not the correct format for this dataset.")
+                    last_labelled_row = 0
+                    for count, row in enumerate(df.itertuples()):
+                        # Check if any labels are True - first 2 items are row index and label name,
+                        # so we remove those to test only the labels
+                        if any(row[2:]):
+                            # Mark that the last frame checked has been labelled
+                            last_labelled_row = count
+
+                    # Set the labeller to the frame after the last one that has been labelled, unless it is at the end
+                    self.frame_select.setValue(min(last_labelled_row + 1, num_rows))
+                    self.label_dataframe = df
+            except Exception as e:
+                self.status_bar.showMessage(f"Failed to open file. - {e}", 5000)
+                self.labelled_data_file.setText("")
+                return
+        self.label_file_path = path
+
+    def add_labelled_frame(self):
+        # Send the current frame as the row index to edit - frame count starts at `0` so should cause no issues
+        self.add_note_presence_labels(self.label_file_path, self.frame_select.value())
+        self.frame_select.setValue(self.frame_select.value() + 1)
+
+    def add_note_presence_labels(self, path, row):
+        data = [self.unlabelled_file_list[self.frame_select.value()][1]]
+
+        for checkbox in self.label_checkboxes:
+            data.append(checkbox.isChecked())
+        self.label_dataframe.loc[row] = data
+        with open(path, "w") as label_file:
+            self.label_dataframe.to_csv(label_file, index=False)
+
+    def set_checkboxes_to_label_states(self, row):
+        if not self.label_dataframe.empty:
+            labels = self.label_dataframe.iloc[row][1:]
+            if any(labels) or self.always_reset_checkmarks.isChecked():
+                for count, checkbox in enumerate(self.label_checkboxes):
+                    # print(labels.iloc[count])
+                    # Emits a deprecation warning for using `np.bool_` as an index. Since this is not the case,
+                    # the closest I can find to a current issue related to this is
+                    # this issue request: https://github.com/OceanParcels/parcels/issues/1119
+                    checkbox.setChecked(labels.iloc[count])
+
     def load_unlabelled_data(self):
         self.unlabelled_data_folder.setText(self.getDirectory())
         self.frame_select.setValue(0)
@@ -356,27 +460,9 @@ class WamaiToolkitMainWindow(QMainWindow):
         if self.unlabelled_file_list:
             data_pixmap = QPixmap(self.unlabelled_file_list[self.frame_select.value()][0])
             self.data_image.setPixmap(data_pixmap)
+            self.set_checkboxes_to_label_states(self.frame_select.value())
         else:
             self.status_bar.showMessage("Please select a source folder before attempting to select a frame.", 5000)
-
-    def add_labelled_frame(self):
-        # TODO: Output labelled data (copy file - label folders should be as 8 set of 1 or 0)
-        if self.frame_select.value() == self.frame_select.maximum():
-            self.status_bar.showMessage("Final frame for this dataset has been labelled.", timeout=15000)
-        else:
-            self.add_note_presence_labels(self.label_file_path)
-            self.frame_select.setValue(self.frame_select.value() + 1)
-
-        # Add label data to CSV - create if not made and add columns, add row, check if full?, load frame after last in csv?
-
-    def add_note_presence_labels(self, path):
-        data = [self.unlabelled_file_list[self.frame_select.value()][1]]
-
-        for checkbox in self.label_checkboxes:
-            data.append(checkbox.isChecked())
-        self.label_dataframe.loc[len(self.label_dataframe.index)] = data
-        with open(path, "w") as label_file:
-            self.label_dataframe.to_csv(label_file, index=False)
 
 
     def genVideoConvWidget(self):
