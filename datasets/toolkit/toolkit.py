@@ -453,7 +453,8 @@ class WamaiToolkitMainWindow(QMainWindow):
 
         self.unlabelled_file_list = pruned_file_list
 
-        self.frame_select.setMaximum(len(self.unlabelled_file_list) - 1)
+        # Prevent SpinBox from being forcefully set to `-1`, and allowing future datasets to use index -1 in the process
+        self.frame_select.setMaximum(max(len(self.unlabelled_file_list) - 1, 0))
         self.load_unlabelled_frame()
 
     def load_unlabelled_frame(self):
