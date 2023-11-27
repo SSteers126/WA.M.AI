@@ -1,7 +1,7 @@
 # Finds if any labels jump backwards in frames, or if the same frame is labelled multiple times in a row.
 # (This is extremely crude, it's been thrown together to fix a mess I made)
 
-with open("TEST-okinimesumama-expert-24-played-incomplete/labels.csv") as f:
+with open("mkdr-basic-15-played/labels.csv") as f:
     frame_num = -1
     last_frame_num = -1
     total_errors = 0
