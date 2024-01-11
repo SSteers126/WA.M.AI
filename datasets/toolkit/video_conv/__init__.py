@@ -1,1 +1,1 @@
-from .runnables import VideoConversionWorker
+from .runnables import VideoConversionWorker, VideoDuplicateRemovalWorker

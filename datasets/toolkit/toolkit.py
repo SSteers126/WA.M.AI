@@ -106,6 +106,7 @@ class WamaiToolkitMainWindow(QMainWindow):
     def genOptionsTabs(self):
         options_tabs = QTabWidget()
         options_tabs.addTab(self.genVideoConvOptionsWidget(), "Convert video")
+        options_tabs.addTab(self.genDuplicateRemovalWidget(), "Remove duplicate frames from dataset")
         options_tabs.addTab(self.genViewWidget(), "View")
         # options_tabs.addTab(self.genVideoConvWidget(), "Convert video")
 
@@ -150,6 +151,14 @@ class WamaiToolkitMainWindow(QMainWindow):
                                         "held fo a very long period of time, or storage constraints are strict.")
         output_options_layout.addRow("Optimise images?: ", self.compress_frames)
 
+        self.remove_duplicate_frames = QCheckBox()
+        self.remove_duplicate_frames.setChecked(True)
+        self.remove_duplicate_frames.setToolTip("Checks adjacent frames after extraction, and removes any that are "
+                                                "identical. Frame numbers are *not* changed after removal."
+                                                "\n\nGenerally recommended to avoid any bias in the trained AI from "
+                                                "identical samples being fed to it multiple times.")
+        output_options_layout.addRow("Remove duplicate frames?: ", self.remove_duplicate_frames)
+
         self.resize_data_enabled = QCheckBox()
         # TODO: Implement resizing
         # self.resize_data_enabled.setDisabled(True)
@@ -177,7 +186,8 @@ class WamaiToolkitMainWindow(QMainWindow):
                                                                                "height": self.resize_height_option.value(),
                                                                                "keep_aspect": self.keep_aspect_option.isChecked(),
                                                                                "aspect_locked_dimension": self.keep_aspect_by.currentText()
-                                                                           }))
+                                                                           },
+                                                                           remove_duplicate_frames=self.remove_duplicate_frames.isChecked()))
         options_with_confirm_layout.addWidget(convert_confirm)
 
         output_options_widget = QWidget()
@@ -222,6 +232,97 @@ class WamaiToolkitMainWindow(QMainWindow):
         resize_options_widget.setLayout(resize_options_layout)
 
         return resize_options_widget
+
+    def genDuplicateRemovalWidget(self):
+        # TODO: Complete UI and add functionality to remove duplicate frame images and labels from existing datasets
+        duplicate_removal_form = QFormLayout()
+
+        self.duplicate_removal_dataset_path = QTextEdit()
+        self.duplicate_removal_dataset_path_select = QPushButton("Select folder...")
+        self.duplicate_removal_dataset_path_select.clicked.connect(lambda: self.duplicate_removal_dataset_path.setText(self.getDirectory()))
+        output_path_layout = QHBoxLayout()
+        output_path_layout.addWidget(self.duplicate_removal_dataset_path)
+        output_path_layout.addWidget(self.duplicate_removal_dataset_path_select)
+        duplicate_removal_form.addRow("Dataset folder: ", output_path_layout)
+
+        self.remove_duplicate_labels = QCheckBox()
+        self.remove_duplicate_labels.setChecked(True)
+        self.remove_duplicate_labels.setToolTip("Checks for any rows pertaining to labels that are found to be "
+                                                "duplicates within the dataset, and removes them from the label file."
+                                                "\nNote that the file will be replaced with a new file "
+                                                "without the duplicate sample labels.")
+        duplicate_removal_form.addRow("Remove labels from dataset file?: ", self.remove_duplicate_labels)
+
+        self.duplicate_removal_label_path = QTextEdit()
+        self.duplicate_removal_label_path.setEnabled(self.remove_duplicate_labels.isChecked())
+        self.duplicate_removal_label_path_select = QPushButton("Select file...")
+        self.duplicate_removal_label_path_select.clicked.connect(lambda: self.duplicate_removal_label_path.setText(QFileDialog.getOpenFileName(self, "Open File", "", "Label file (*.csv)")[0]))
+        output_path_layout = QHBoxLayout()
+        output_path_layout.addWidget(self.duplicate_removal_label_path)
+        output_path_layout.addWidget(self.duplicate_removal_label_path_select)
+        duplicate_removal_form.addRow("Label file: ", output_path_layout)
+
+
+
+        self.remove_duplicate_labels.clicked.connect(lambda: self.duplicate_removal_label_path.setEnabled(self.remove_duplicate_labels.isChecked()))
+
+        duplicate_removal_widget = QWidget()
+        duplicate_removal_layout = QVBoxLayout()
+
+        duplicate_removal_layout.addLayout(duplicate_removal_form)
+
+        self.begin_duplicate_removal_button = QPushButton("Remove duplicate samples")
+        self.begin_duplicate_removal_button.clicked.connect(
+            lambda: self.start_duplicate_removal_worker(
+                self.duplicate_removal_dataset_path.toPlainText(),
+                (label_path := self.duplicate_removal_label_path.toPlainText()),
+                # Ensure the path is filled
+                self.remove_duplicate_labels.isChecked() and label_path
+            )
+        )
+
+        duplicate_removal_layout.addWidget(self.begin_duplicate_removal_button)
+
+        duplicate_removal_widget.setLayout(duplicate_removal_layout)
+        return duplicate_removal_widget
+
+    def start_duplicate_removal_worker(self, dataset_path, label_path, remove_dataframe_labels):
+        if self.valid_frame_removal_form_input():
+            duplicate_removal_worker = video_conv.VideoDuplicateRemovalWorker(dataset_path, label_path,
+                                                                              remove_dataframe_labels)
+            duplicate_removal_worker.signals.frame_removal.connect(self.displayFrameRemovalStart)
+            duplicate_removal_worker.signals.label_removal.connect(self.displayLabelRemovalStart)
+            duplicate_removal_worker.signals.finished.connect(self.displayFrameRemovalCompletion)
+            self.thread_pool.start(duplicate_removal_worker)
+
+    def displayFrameRemovalStart(self, job_name):
+        self.status_bar.showMessage(f"[{job_name}] Beginning frame removal (This may take some time)...")
+
+    def displayLabelRemovalStart(self, job_name):
+        self.status_bar.showMessage(f"[{job_name}] Beginning label removal...")
+
+    def displayFrameRemovalCompletion(self, completion_data):
+        self.status_bar.showMessage(f"[{completion_data['job_name']}] Duplicate removal complete! "
+                                    f"Removed duplicates: {completion_data['frames_removed']}", timeout=15000)
+
+    def valid_frame_removal_form_input(self) -> bool:
+        # If a folder is selected
+        if ((folder_path := self.duplicate_removal_dataset_path.toPlainText())
+            and (
+                # And a label file is selected or labels are not being removed
+                (input_file := self.duplicate_removal_label_path.toPlainText()
+                    or not self.remove_duplicate_labels.isChecked())
+                )):
+            out_folder_exists = isdir(folder_path)
+            input_file_exists = isfile(input_file)
+            # Returning `out_folder_exists and input_file_exists` would be valid,
+            # but would not send the message to the window
+            if out_folder_exists and (input_file_exists or not self.remove_duplicate_labels.isChecked()):
+                return True
+        self.status_bar.showMessage("Invalid duplicate removal form input. "
+                                    "Please check and correct your selections.",
+                                    timeout=5000)
+        return False
 
     def genFrameLabelWidget(self):
         label_groupbox = QGroupBox("Frame to label")
@@ -486,7 +587,7 @@ class WamaiToolkitMainWindow(QMainWindow):
 
 
     def get_videos(self):
-        path, file_filter = QFileDialog.getOpenFileName(self, "Open Folder", "")
+        path, file_filter = QFileDialog.getOpenFileName(self, "Open File", "")
         self.video_paths.setText(path)
         file_name = path.split("/")[-1]
         # Change output_name to the video file name if no name is given
@@ -499,24 +600,32 @@ class WamaiToolkitMainWindow(QMainWindow):
     def set_aspect_by_state(self):
         self.keep_aspect_by.setEnabled(self.keep_aspect_option.isChecked())
 
-    def startConversionWorker(self, video_path, output_path, frame_name, compress_frames, resize, resize_options):
+    def startConversionWorker(self, video_path, output_path, frame_name, compress_frames, resize, resize_options, remove_duplicate_frames):
 
-        if self.valid_form_input():
+        if self.valid_video_conversion_form_input():
             video_conversion_worker = video_conv.VideoConversionWorker(video_path=video_path,
                                                                        output_path=output_path,
                                                                        frame_name=frame_name,
                                                                        compress_frames=compress_frames,
-                                                                       resize=resize, resize_options=resize_options)
+                                                                       resize=resize, resize_options=resize_options,
+                                                                       remove_duplicate_frames=remove_duplicate_frames)
             video_conversion_worker.signals.progress.connect(self.displayVideoProcessingProgress)
-            video_conversion_worker.signals.finished.connect(
-                lambda: self.status_bar.showMessage(f"[{frame_name}] Processing video complete!", timeout=15000))
+            video_conversion_worker.signals.pruning.connect(self.displayFrameDuplicateRemoval)
+            video_conversion_worker.signals.finished.connect(self.displayConversionCompletion)
             self.thread_pool.start(video_conversion_worker)
 
     def displayVideoProcessingProgress(self, progress_data):
         self.status_bar.showMessage(f"[{progress_data['frame_name']}] Processing video... "
                                     f"(Last frame output: {progress_data['frame_num']})")
 
-    def valid_form_input(self) -> bool:
+    def displayFrameDuplicateRemoval(self, frame_name):
+        self.status_bar.showMessage(f"[{frame_name}] Removing duplicate frames (This may take some time)...")
+
+    def displayConversionCompletion(self, completion_data):
+        self.status_bar.showMessage(f"[{completion_data['frame_name']}] Processing video complete!"
+                                    f"{' Duplicated frames removed: ' + str(completion_data['frame_duplicates']) if completion_data['frame_duplicates'] != -1 else ''}", timeout=15000)
+
+    def valid_video_conversion_form_input(self) -> bool:
         if (self.output_file_name.toPlainText()
                 and (folder_path := self.output_folder_path.toPlainText())
                 and (input_file := self.video_paths.toPlainText())):
@@ -526,7 +635,9 @@ class WamaiToolkitMainWindow(QMainWindow):
             # but would not send the message to the window
             if out_folder_exists and input_file_exists:
                 return True
-        self.status_bar.showMessage("Invalid form input. Please check and correct your selections.", timeout=5000)
+        self.status_bar.showMessage("Invalid video conversion form input. "
+                                    "Please check and correct your selections.",
+                                    timeout=5000)
         return False
 
 

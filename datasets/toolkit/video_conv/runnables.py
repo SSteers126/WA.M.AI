@@ -1,16 +1,61 @@
 # from ..video_conv_testing import video_to_frames
-from PySide6.QtCore import QRunnable, Slot, QObject, Signal
+
+from hashlib import sha512
+from os import listdir
+from os import remove as remove_file
 from pathlib import Path
+
+
 import cv2
 from PIL import Image
-from PySide6.QtWidgets import QProgressDialog
+from PySide6.QtCore import QRunnable, Slot, QObject, Signal
+
+from .image_duplicate_removal import remove_duplicate_images, remove_labels
+# from PySide6.QtWidgets import QProgressDialog
+
+class VideoDuplicateRemovalSignals(QObject):
+    frame_removal = Signal(str)
+    label_removal = Signal(str)
+    finished = Signal(dict)
+
+
+class VideoDuplicateRemovalWorker(QRunnable):
+    '''
+    VideoConversionWorker thread
+    '''
+
+    def __init__(self, dataset_path: str | Path, label_path="", remove_dataframe_labels=False):
+        super(VideoDuplicateRemovalWorker, self).__init__()
+        self.dataset_path = dataset_path
+        self.label_path = label_path
+        self.remove_dataframe_labels = remove_dataframe_labels
+        self.signals = VideoDuplicateRemovalSignals()
+
+    @Slot()  # QtCore.Slot
+    def run(self):
+        dataset_path = Path(self.dataset_path)
+        label_path = Path(self.label_path)
+        # Use the last folder name as a name to use for signals to help identify it
+        # (assumed this folder will be likely to be names after the respective dataset)
+        removal_job_name = dataset_path.parts[-1]
+        self.signals.frame_removal.emit(removal_job_name)
+        removed_frames = remove_duplicate_images(dataset_path)
+        # Remove labels from the given label file if requested
+        if self.remove_dataframe_labels:
+            self.signals.label_removal.emit(removal_job_name)
+            remove_labels(label_path, removed_frames)
+
+        self.signals.finished.emit({"job_name": removal_job_name, "frames_removed": len(removed_frames)})
 
 
 class VideoConversionSignals(QObject):
-    finished = Signal()  # QtCore.Signal
     error = Signal(tuple)
     cur_frame = Signal(int)
     progress = Signal(dict)
+    pruning = Signal(str)
+    finished = Signal(dict)
+
+
 class VideoConversionWorker(QRunnable):
     '''
     VideoConversionWorker thread
@@ -79,7 +124,13 @@ class VideoConversionWorker(QRunnable):
             frame += 1
             self.signals.progress.emit({"frame_name": self.kwargs["frame_name"], "frame_num": frame})
 
-        self.signals.finished.emit()
+        frame_duplicates = -1
+
+        if self.kwargs["remove_duplicate_frames"]:
+            self.signals.pruning.emit(self.kwargs["frame_name"])
+            frame_duplicates = len(remove_duplicate_images(output_folder))
+
+        self.signals.finished.emit({"frame_name": self.kwargs["frame_name"], "frame_duplicates": frame_duplicates})
 
 
     def resize_dimensions_with_aspect(self, dimension1, dimension2, dimension1_new):
