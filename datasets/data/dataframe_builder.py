@@ -81,7 +81,7 @@ def compile_dataset_labels(label_file_paths: list[Path]) -> pd.DataFrame:
                 df.loc[row_num, "file_name"] = str(sample_path)
             else:
                 raise ValueError(f"'{row[0]}' does not resolve to a real file. Check that all files are present. "
-                                 f"(File path checked: {sample_path})")
+                                 f"(File label_path checked: {sample_path})")
 
         dataframes.append(df)
 

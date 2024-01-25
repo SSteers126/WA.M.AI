@@ -14,7 +14,7 @@ from os.path import isdir, isfile, exists
 from os import listdir
 from pathlib import Path
 
-
+import label_tools
 import video_conv
 
 # exts = Image.registered_extensions()
@@ -58,7 +58,7 @@ class WamaiToolkitMainWindow(QMainWindow):
         self.screen_res_x, self.screen_res_y = self.screen().size().toTuple()
         self.resize(self.screen_res_x//4 * 3, self.screen_res_y//4 * 3)
 
-        # Will contain file paths and names - each item will be a tuple of absolute path and file name
+        # Will contain file paths and names - each item will be a tuple of absolute label_path and file name
         self.unlabelled_file_list = []
         self.status_bar = QStatusBar()
 
@@ -122,7 +122,7 @@ class WamaiToolkitMainWindow(QMainWindow):
         video_paths_layout.addWidget(self.video_paths)
         video_paths_layout.addWidget(self.video_paths_select)
 
-        output_options_layout.addRow(QLabel("Video path: "), video_paths_layout)
+        output_options_layout.addRow(QLabel("Video label_path: "), video_paths_layout)
 
         self.output_folder_path = QTextEdit()
         self.output_path_select = QPushButton("Select folder...")
@@ -131,7 +131,7 @@ class WamaiToolkitMainWindow(QMainWindow):
         output_path_layout.addWidget(self.output_folder_path)
         output_path_layout.addWidget(self.output_path_select)
 
-        output_options_layout.addRow("Output path: ", output_path_layout)
+        output_options_layout.addRow("Output label_path: ", output_path_layout)
 
         self.output_file_name = QTextEdit()
         self.output_file_name.setToolTip("The file name to use for output images. "
@@ -276,7 +276,7 @@ class WamaiToolkitMainWindow(QMainWindow):
             lambda: self.start_duplicate_removal_worker(
                 self.duplicate_removal_dataset_path.toPlainText(),
                 (label_path := self.duplicate_removal_label_path.toPlainText()),
-                # Ensure the path is filled
+                # Ensure the label_path is filled
                 self.remove_duplicate_labels.isChecked() and label_path
             )
         )
@@ -390,10 +390,10 @@ class WamaiToolkitMainWindow(QMainWindow):
 
         labelled_data_folder_layout = QHBoxLayout()
         self.labelled_data_file = QTextEdit()
-        self.labelled_data_file_select = QPushButton("Select path...")
+        self.labelled_data_file_select = QPushButton("Select label_path...")
         labelled_data_folder_layout.addWidget(self.labelled_data_file)
         labelled_data_folder_layout.addWidget(self.labelled_data_file_select)
-        label_options_layout.addRow("Labelled data output path: ", labelled_data_folder_layout)
+        label_options_layout.addRow("Labelled data output label_path: ", labelled_data_folder_layout)
         self.labelled_data_file_select.clicked.connect(self.select_dataset_labels_file)
 
         self.labelled_data_submit = QPushButton("Add labels to label file")
@@ -416,82 +416,30 @@ class WamaiToolkitMainWindow(QMainWindow):
         for checkbox in self.label_checkboxes:
             checkbox.setChecked(False)
 
-    def create_note_presence_label_file_stub_LEGACY(self, path):
-        # TODO: After okinimesumama is labelled, change system to generate all rows immediately, then use `iloc`
-        #  to change the correct row for a frame - allows for error correction without an external program
-        path = Path(path)
-        columns = ["file_name",
-                   "b1", "b2", "b3", "b4",
-                   "b5", "b6", "b7", "b8"]
-        if not exists(path):
-            with open(path, "w") as label_file:
-                pd.DataFrame(columns=["file_name",
-                                      "b1", "b2", "b3", "b4",
-                                      "b5", "b6", "b7", "b8"]).to_csv(label_file, index=False)
-        else:
-            self.status_bar.showMessage("Reading existing label file...", timeout=3000)
-            try:
-                with open(path, "r") as label_file:
-                    df = pd.read_csv(label_file)
-                if list(df.columns) != columns:
-                    self.status_bar.showMessage("Specified file is not a valid label file.", 5000)
-                    self.labelled_data_file.setText("")
-                else:
-                    rows = len(df.index)
-                    if rows <= self.frame_select.maximum():
-                        self.frame_select.setValue(rows)
-                        self.label_dataframe = df
-            except Exception as e:
-                self.status_bar.showMessage("Failed to open file as a DataFrame.", 5000)
-                self.labelled_data_file.setText("")
-                return
-        self.label_file_path = path
-
-    def add_note_presence_labels_LEGACY(self, path):
-        data = [self.unlabelled_file_list[self.frame_select.value()][1]]
-
-        for checkbox in self.label_checkboxes:
-            data.append(checkbox.isChecked())
-        self.label_dataframe.loc[len(self.label_dataframe.index)] = data
-        with open(path, "w") as label_file:
-            self.label_dataframe.to_csv(label_file, index=False)
-
-    def add_labelled_frame_LEGACY(self):
-        if self.frame_select.value() == self.frame_select.maximum():
-            self.status_bar.showMessage("Final frame for this dataset has been labelled.", timeout=15000)
-        else:
-            self.add_note_presence_labels_LEGACY(self.label_file_path)
-            self.frame_select.setValue(self.frame_select.value() + 1)
-
-        # Add label data to CSV - create if not made and add columns, add row, check if full?, load frame after last in csv?
-
-
-    def create_note_presence_label_file_frame(self, path):
+    def create_note_presence_label_file_frame(self, label_path):
         if not self.unlabelled_file_list:
             self.status_bar.showMessage("No data to make label frame file. "
                                         "Please select a dataset first.", timeout=15000)
             return
 
-        path = Path(path)
-        columns = ["file_name",
-                   "b1", "b2", "b3", "b4",
-                   "b5", "b6", "b7", "b8"]
-        if not exists(path):
+        label_path = Path(label_path)
+
+        if not exists(label_path):
             # Generate empty rows
-            self.label_dataframe = pd.DataFrame(columns=columns)
-            for frame in self.unlabelled_file_list:
-                self.label_dataframe.loc[len(self.label_dataframe.index)] = [frame[1],
-                                                             False, False, False, False,
-                                                             False, False, False, False]
-            with open(path, "w") as label_file:
-                self.label_dataframe.to_csv(label_file, index=False)
+            label_df = label_tools.generate_eight_zone_label_df(self.unlabelled_file_list)
+            label_tools.save_label_df(label_df, label_path)
 
             self.frame_select.setValue(0)
 
+        # TODO: Refactor functionality to simplify usage with other label types
         else:
+            columns = ("file_name",
+                       "b1", "b2", "b3", "b4",
+                       "b5", "b6", "b7", "b8")
+
             self.status_bar.showMessage("Reading existing label file...", timeout=3000)
             try:
-                with open(path, "r") as label_file:
+                with open(label_path, "r") as label_file:
                     df = pd.read_csv(label_file)
                 if list(df.columns) != columns:
                     self.status_bar.showMessage("Specified file is not a valid label file.", 5000)
@@ -515,7 +463,7 @@ class WamaiToolkitMainWindow(QMainWindow):
                 self.status_bar.showMessage(f"Failed to open file. - {e}", 5000)
                 self.labelled_data_file.setText("")
                 return
-        self.label_file_path = path
+        self.label_file_path = label_path
 
     def add_labelled_frame(self):
         # Send the current frame as the row index to edit - frame count starts at `0` so should cause no issues

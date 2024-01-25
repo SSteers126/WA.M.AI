@@ -54,7 +54,7 @@ def remove_labels(label_fp: str | Path, duplicate_labels: list[str]):
     """
     Removes rows from a label file and overwrites it with the respective labels removed
 
-    :param label_fp: The file path of the label file to remove labels from
+    :param label_fp: The file label_path of the label file to remove labels from
     :param duplicate_labels: The names of samples to remove the label row of within the file
     :return:
     """
