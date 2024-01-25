@@ -1,1 +1,2 @@
 from .eight_zone_presence import generate_eight_zone_label_df
+from .eight_zone_presence import DF_DTYPES as EIGHT_ZONE_DF_DTYPES

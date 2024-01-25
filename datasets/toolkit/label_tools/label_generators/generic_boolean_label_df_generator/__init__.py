@@ -1,1 +1,1 @@
-from .df_generator import generate_boolean_label_df
+from .df_generator import generate_empty_label_df

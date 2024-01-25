@@ -433,14 +433,15 @@ class WamaiToolkitMainWindow(QMainWindow):
 
         # TODO: Refactor functionality to simplify usage with other label types
         else:
-            columns = ("file_name",
+            columns = ["file_name",
                        "b1", "b2", "b3", "b4",
-                       "b5", "b6", "b7", "b8")
+                       "b5", "b6", "b7", "b8"]
 
             self.status_bar.showMessage("Reading existing label file...", timeout=3000)
             try:
                 with open(label_path, "r") as label_file:
                     df = pd.read_csv(label_file)
+                    print(list(df.dtypes))
                 if list(df.columns) != columns:
                     self.status_bar.showMessage("Specified file is not a valid label file.", 5000)
                     self.labelled_data_file.setText("")
@@ -450,9 +451,9 @@ class WamaiToolkitMainWindow(QMainWindow):
                         raise ValueError("Specified dataframe is not the correct format for this dataset.")
                     last_labelled_row = 0
                     for count, row in enumerate(df.itertuples()):
-                        # Check if any labels are True - first 2 items are row index and label name,
-                        # so we remove those to test only the labels
-                        if any(row[2:]):
+                        # Check if the frame is labelled - new dataframes will default to `None`s instead of `False`s
+                        label_values = row[2:]
+                        if True in label_values or False in label_values:
                             # Mark that the last frame checked has been labelled
                             last_labelled_row = count
 
@@ -475,6 +476,7 @@ class WamaiToolkitMainWindow(QMainWindow):
 
         for checkbox in self.label_checkboxes:
             data.append(checkbox.isChecked())
+        print(self.label_dataframe.head())
         self.label_dataframe.loc[row] = data
         with open(path, "w") as label_file:
             self.label_dataframe.to_csv(label_file, index=False)
@@ -482,13 +484,18 @@ class WamaiToolkitMainWindow(QMainWindow):
     def set_checkboxes_to_label_states(self, row):
         if not self.label_dataframe.empty:
             labels = self.label_dataframe.iloc[row][1:]
-            if any(labels) or self.always_reset_checkmarks.isChecked():
+            if (True in labels or False in labels) or self.always_reset_checkmarks.isChecked():
                 for count, checkbox in enumerate(self.label_checkboxes):
                     # print(labels.iloc[count])
                     # Emits a deprecation warning for using `np.bool_` as an index. Since this is not the case,
                     # the closest I can find to a current issue related to this is
                     # this issue request: https://github.com/OceanParcels/parcels/issues/1119
-                    checkbox.setChecked(labels.iloc[count])
+
+                    # All NaN's are assumed as False
+                    label = False
+                    if isinstance(labels.iloc[count], bool):
+                        label = labels.iloc[count]
+                    checkbox.setChecked(label)
 
     def load_unlabelled_data(self):
         self.unlabelled_data_folder.setText(self.getDirectory())
