@@ -1,7 +1,7 @@
 import sys
 
 import pandas
-from PySide6.QtGui import QTextFormat, QPixmap
+from PySide6.QtGui import QTextFormat, QPixmap, QShortcut, QKeySequence
 from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtWidgets import (QApplication, QMainWindow, QLabel, QWidget, QPushButton,
                                QGridLayout, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -325,7 +325,7 @@ class WamaiToolkitMainWindow(QMainWindow):
         return False
 
     def genFrameLabelWidget(self):
-        label_groupbox = QGroupBox("Frame to label")
+        label_groupbox = QGroupBox("Frame to label (click or press the corresponding number to toggle labels)")
         self.data_image = QLabel()
         data_pixmap = QPixmap("okinimesumama-expert-24-played-incomplete-0000001350.png")
         # data_pixmap = data_pixmap.scaledToWidth(self.height() // 2)
@@ -343,6 +343,10 @@ class WamaiToolkitMainWindow(QMainWindow):
             # Appends the checkboxes to the list in the same order as the buttons
             labelling_layout.addWidget(self.label_checkboxes[-1], i % 4 if i < 4 else 3 - (i % 4), 5 if i <= 3 else 0,
                                        Qt.AlignmentFlag.AlignVCenter)
+            # NOTE: will file when in other tabs, but until a more suitable target is found
+            # to fire it only on the correct tab, the added convenience outweighs the unintended firing
+            # as the consequences are little to none.
+            QShortcut(QKeySequence(f"{i+1}"), self, self.label_checkboxes[-1].click)
 
         label_groupbox.setLayout(labelling_layout)
 
@@ -429,6 +433,7 @@ class WamaiToolkitMainWindow(QMainWindow):
             label_df = label_tools.generate_eight_zone_label_df(self.unlabelled_file_list)
             label_tools.save_label_df(label_df, label_path)
 
+            self.label_dataframe = label_df
             self.frame_select.setValue(0)
 
         # TODO: Refactor functionality to simplify usage with other label types
@@ -441,7 +446,6 @@ class WamaiToolkitMainWindow(QMainWindow):
             try:
                 with open(label_path, "r") as label_file:
                     df = pd.read_csv(label_file)
-                    print(list(df.dtypes))
                 if list(df.columns) != columns:
                     self.status_bar.showMessage("Specified file is not a valid label file.", 5000)
                     self.labelled_data_file.setText("")
@@ -476,7 +480,6 @@ class WamaiToolkitMainWindow(QMainWindow):
 
         for checkbox in self.label_checkboxes:
             data.append(checkbox.isChecked())
-        print(self.label_dataframe.head())
         self.label_dataframe.loc[row] = data
         with open(path, "w") as label_file:
             self.label_dataframe.to_csv(label_file, index=False)
